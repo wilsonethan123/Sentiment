@@ -1,0 +1,100 @@
+import math
+import json
+import requests
+import itertools
+import numpy as np
+import time
+from datetime import datetime, timedelta
+import pmaw
+from pmaw import PushshiftAPI
+import pandas as pd
+## Initalizing pushshiftAPI for reddit scraping 
+from datetime import datetime
+from dateutil import rrule
+ 
+# dates
+before = int(datetime(2020,4,2,0,0).timestamp())
+after = int(datetime(2020,4,1,0,0).timestamp())
+
+start_date = datetime(2020, 4, 1)     ##Scrape 18 months of posts 
+end_date = datetime(2021, 10, 30)
+api = PushshiftAPI()
+data = []
+lst = ['title', 'score', 'id', 'created_utc', 'num_comments']      ##Return relevant columns
+print(data)
+
+def fxn(item):
+  return item['score'] > 100 & item['num_comments'] > 0       ##Only posts with active engagement
+##Reddit data scraping, limited to 1000 posts per day for the selected data range 
+for dt in rrule.rrule(rrule.DAILY, dtstart=start_date, until=end_date):
+    after = dt 
+    before = dt + timedelta(days=1)
+    before = int(before.timestamp())
+    after = int(after.timestamp())
+    posts = api.search_submissions(
+        subreddit='coronavirus',
+        before=before,
+        after=after,
+        filter_fn=fxn,                    ##filtered posts with active engagement 
+        limit = 1000)                     ##Limit to 1000 total per month
+    posts = pd.DataFrame(posts)
+    posts = posts[posts.columns.intersection(lst)]
+    data.append(posts)
+
+final_df = pd.concat(data, ignore_index=True)
+final_df = final_df.sort_values(by='num_comments', ascending=False)
+
+print(final_df)
+
+ids = final_df.id.unique()
+print(ids)           ## output unique post ids for comment scraping
+
+## For each post for previous criteria, scrape comments 
+comment_list = []
+for sub_id in ids:
+    submission = reddit.submission(sub_id)
+    submission.comments.replace_more(limit=None)
+    for comment in submission.comments.list():
+        comment_list.append(comment.__dict__)
+
+##Building final dataframe
+comments_df = pd.DataFrame(comment_list)
+comments_df[['id','body','score','created_utc']].sort_values('score', ascending=False)
+comments_df = comments_df[(comments_df.body != '[removed]')]               ##data cleanup
+comments_df = comments_df[(comments_df.body != '[deleted]')]
+comments_df = comments_df[comments_df['processed_text'].str.contains("Your comment has been removed") == False]
+comments_df=comments_df[comments_df['processed_text'] != '']
+comments_df=comments_df[['id','body','score','created_utc']].sort_values('score', ascending=False)
+comments_df = comments_df.reset_index(drop=True)
+
+## Convert dates from epoch time to standard datetime
+
+import datetime
+comments_df['Convert_date']=pd.to_datetime(comments_df['created_utc'], unit='s').dt.tz_localize('utc')
+
+##Group dates by month and year
+comments_df = comments_df[['id', 'body', 'processed_text', 'Month_name', 'Year']]
+comments_df['processed_text']=comments_df['processed_text'].str.lower()
+months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+comments_df['Month_name'] = pd.Categorical(comments_df['Month_name'], categories=months, ordered=True)
+comments_df = comments_df.reset_index(drop=True)
+comments_df['Date'] = comments_df['Month_name'].astype(str) + ' ' + comments_df['Year'].astype(str)
+comments_df = comments_df[['id', 'body', 'processed_text', 'Date']]
+
+##Data exploration
+comments_df['processed_text'].str.len() ##Number of characters per string
+
+##aggregate info
+counts = comments_df.groupby(['Date'])['processed_text'].count()
+
+counts_df = pd.DataFrame(counts)
+counts_df
+
+avg_length = comments_df.groupby(['Date'])['Num of characters'].mean()
+
+avg_length_df = pd.DataFrame(avg_length)
+avg_length_df['Num of characters'] = round(avg_length_df['Num of characters'])
+
+print(counts_df,avg_length_df)
+
+##Final dataframe ready for sentiment analysis
